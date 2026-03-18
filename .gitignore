@@ -143,6 +143,9 @@ docs/_build/
 # MkDocs
 /site
 
+# mdbook
+docs/book/
+
 # PyBuilder
 .pybuilder/
 target/
