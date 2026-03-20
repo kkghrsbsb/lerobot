@@ -17,8 +17,10 @@ from .config_piper_follower import PIPERFollowerConfig
 
 logger = logging.getLogger(__name__)
 
+
 def get_motor_names(arm: dict[str, Any]) -> list[str]:
     return [motor for arm_key, bus in arm.items() for motor in bus.motors]
+
 
 class PIPERFollower(Robot):
     config_class = PIPERFollowerConfig
@@ -38,7 +40,7 @@ class PIPERFollower(Robot):
                     "joint_5": (5, "agilex_piper"),
                     "joint_6": (6, "agilex_piper"),
                     "gripper": (7, "agilex_piper"),
-                }
+                },
             )
         )
         self.logs = {}
@@ -54,7 +56,7 @@ class PIPERFollower(Robot):
             cam_ft[key] = {
                 "shape": (cam.height, cam.width, cam.channels),
                 "names": ["height", "width", "channels"],
-                "info": None,   
+                "info": None,
             }
         return cam_ft
 
@@ -124,9 +126,7 @@ class PIPERFollower(Robot):
     def connect(self) -> None:
         """Connect piper and cameras"""
         if self._is_connected:
-            raise DeviceAlreadyConnectedError(
-                "Piper is already connected. Do not run robot.connect() twice."
-            )
+            raise DeviceAlreadyConnectedError("Piper is already connected. Do not run robot.connect() twice.")
 
         self.bus.connect(enable=True)
         print("piper follower connected")

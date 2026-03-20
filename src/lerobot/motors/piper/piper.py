@@ -34,3 +34,4 @@ class PiperMotorsBus:
         self.ports = connect_can()
         self.robot = piper_interface.PiperInterface(can_port=self.ports[0])
         self.motors = config.motors
+# todo: 参考 ref_only_piper.py
