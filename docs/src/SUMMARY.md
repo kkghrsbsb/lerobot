@@ -1,6 +1,6 @@
 # Summary
 
-- [项目总览](README.md)
+- [项目总览（入口文档）](README.md)
 
 - [reference]()
 
@@ -14,3 +14,11 @@
     - [06 学习 Transformer 机器人（ACT）](reference/piper-act-deployment/06-learning-transformer-robot-throught-ACT.md)
     - [07 基于注意力机制的模仿学习](reference/piper-act-deployment/07-imitation-learning-with-attention-mechanisms.md)
     - [08 Piper ACT 试验记录](reference/piper-act-deployment/08-piper-ACT-trial-record.md)
+
+- [review]()
+
+  - [PiperMotorsBus write 及整体代码审查](review/piper-motors-bus-write-and-general.md)
+
+- [explain]()
+
+  - [PiperMotorsBus 缺陷修复变更说明](explain/piper-motors-bus-bugfix.md)

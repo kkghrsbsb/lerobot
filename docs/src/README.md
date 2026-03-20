@@ -1,185 +1,179 @@
-# Piper 机械臂 lerobot 适配项目
+# Piper × LeRobot 适配项目总览
 
-## 项目目标
+本文档是理解和维护本仓库的首要入口。每次改动涉及项目结构、脚本用法、依赖关系或安全注意事项时，应同步更新此文件。
 
-本仓库是 [huggingface/lerobot](https://github.com/huggingface/lerobot) 的 fork，在 `feat/piper-robot-adapter` 分支上进行 **Piper 机械臂** 的适配工作。
+---
 
-最终目标：让 Piper 机械臂能够通过 lerobot 的标准流程完成 **数据采集（`lerobot_record.py`）、模型训练、策略评估** 三大环节，实现基于 ACT 等模仿学习算法的自主操作。
+## 项目背景
 
-## 架构概览
+本仓库是 [huggingface/lerobot](https://github.com/huggingface/lerobot) 的 fork，工作分支为 `feat/piper-robot-adapter`。
 
-lerobot 框架对硬件的抽象分为三层：
+**目标**：将 AgileX Piper 六轴机械臂（含夹爪）接入 lerobot 框架，使其能够通过 `lerobot-record` 脚本完成遥操作数据采集，并最终支持训练和评估流程。
 
-```
-lerobot_record.py
-  ├── Robot (从臂 / follower) — 接收动作指令，驱动关节运动，采集观测
-  ├── Teleoperator (主臂 / leader) — 读取操作员的关节动作作为遥操作信号
-  └── MotorsBus — 底层电机总线通信
-```
+**控制库**：`piper_control`（通过 `uv add piper-control` 安装），是对底层 `piper_sdk` 的高层封装，屏蔽了 CAN 协议细节并内置单位转换（返回 rad）。
 
-Piper 适配需要实现以下三个模块，使其符合框架的抽象接口：
+---
 
-| 层级 | 基类 | Piper 实现 | 文件 |
-|------|------|-----------|------|
-| Robot | `Robot` (robot.py) | `PIPERFollower` | `src/lerobot/robots/piper_follower/piper_follower.py` |
-| Teleoperator | `Teleoperator` (teleoperator.py) | `PIPERLeader` | `src/lerobot/teleoperators/piper_leader/piper_leader.py` |
-| MotorsBus | — | `PiperMotorsBus` | `src/lerobot/motors/piper/piper.py` |
-
-## 控制库
-
-- **`piper_control`**（通过 `uv add piper-control` 安装）：对底层 `piper_sdk` 的高层封装，提供 CAN 连接管理、关节位置控制器、安全断连等功能。
-- **`piper_sdk`**（`piper_control` 的底层依赖）：直接与 Piper 硬件通信的 CAN 协议库。
-
-适配代码应当基于 `piper_control` 编写，而非直接调用 `piper_sdk`。
-
-### `piper_control` API 速查
-
-以下 API 来自用户的实验仓库 `piper_control_demo`（导出在 `docs/ref_project/` 下），展示了 `piper_control` 的典型用法：
-
-**连接与初始化**
-```python
-from piper_control import piper_connect, piper_init, piper_interface, piper_control
-
-# CAN 连接
-ports = piper_connect.find_ports()
-piper_connect.activate(ports)
-ports = piper_connect.active_ports()  # e.g. ["can0"]
-
-# 创建机器人句柄
-robot = piper_interface.PiperInterface(can_port=ports[0])
-robot.set_installation_pos(piper_interface.ArmInstallationPos.UPRIGHT)
-
-# 使能（内置位置/速度模式）
-piper_init.reset_arm(
-    robot,
-    arm_controller=piper_interface.ArmController.POSITION_VELOCITY,
-    move_mode=piper_interface.MoveMode.JOINT,
-)
-piper_init.reset_gripper(robot)
-robot.enable_gripper()
-```
-
-**读取状态**（单位已经是弧度，无需手动转换）
-```python
-robot.get_joint_positions()    # → list[float], 6 个关节，单位 rad
-robot.get_joint_velocities()   # → list[float]
-robot.get_gripper_state()      # → (gripper_pos, gripper_effort)
-robot.is_arm_enabled()         # → bool
-robot.is_gripper_enabled()     # → bool
-robot.gripper_angle_max        # 夹爪最大开度
-robot.gripper_effort_max       # 夹爪最大力
-```
-
-**关节控制（内置位置/速度模式）**
-```python
-with piper_control.BuiltinJointPositionController(robot, rest_position=None) as ctrl:
-    robot.set_arm_mode(speed=10)  # speed ∈ [0, 100]，低值更安全
-    ctrl.command_joints([j1, j2, j3, j4, j5, j6])       # 发送 6 关节目标位
-    ctrl.move_to_position(target, threshold=0.01, timeout=12.0)  # 阻塞式到位
-    robot.command_gripper(position, effort)               # 夹爪指令
-```
-
-**安全关闭**
-```python
-piper_init.disable_arm(robot)   # 失能机械臂
-robot.disable_gripper()          # 失能夹爪
-robot.disable_arm()              # 也可直接调用
-```
-
-**碰撞保护**
-```python
-robot.set_collision_protection([5, 5, 5, 5, 5, 5])  # 6 关节各自的等级
-robot.get_collision_protection()                       # 读回验证
-```
-
-> **关键发现**：`piper_control` 已内置弧度单位转换。`robot.get_joint_positions()` 直接返回 rad，`command_joints()` 接受 rad。
-> 这意味着参考实现（`ref_only_*`）中的 `joint_factor = 57324.840764` 手动换算在新实现中 **不需要**。
-
-## 当前进度
-
-### 已完成
-
-- 项目结构搭建：三个适配模块的目录和配置文件已创建。
-- `PIPERFollowerConfig` / `PIPERLeaderConfig` 已通过 `@RobotConfig.register_subclass` / `@TeleoperatorConfig.register_subclass` 注册到框架。
-- 参考实现（`ref_only_*` 文件）已从 [Kane1440/lerobot_piper2](https://github.com/Kane1440/lerobot_piper2) 引入，作为只读对照。
-- `piper_follower.py` 和 `piper_leader.py` 已有初步实现，包括 `connect`、`disconnect`、`calibrate`、`get_observation`/`get_action`、`send_action` 等方法骨架。
-
-### 进行中 / 待完成
-
-1. **`PiperMotorsBus` 重写**（`piper.py`）
-   - 当前状态：仅有 `connect_can()` 和构造函数的框架代码，标注了 `# todo: 参考 ref_only_piper.py`。
-   - 需要实现：`connect`、`read`、`write`、`safe_disconnect`、`apply_calibration` 等核心方法，全部基于 `piper_control` API 而非 `piper_sdk`。
-   - 这是整个适配的 **核心瓶颈**——Follower 和 Leader 都依赖此类。
-
-2. **框架注册**
-   - `piper_follower` 和 `piper_leader` 尚未在 `lerobot_record.py` 的 import 列表中注册。需要在 `src/lerobot/robots/__init__.py`（或 `lerobot_record.py` 的显式 import）中添加，才能通过 `--robot.type=piper_follower` 调用。
-
-3. **单位与标定**
-   - 参考实现中关节单位为 0.001 度（piper_sdk 原始单位），通过 `joint_factor = 57324.840764` 转换为弧度。
-   - **已确认**：`piper_control` 的 `get_joint_positions()` 直接返回弧度，`command_joints()` 接受弧度。新实现中不需要 `joint_factor` 换算。
-   - 夹爪单位：`piper_control` 提供 `robot.gripper_angle_max` 属性，`command_gripper(position, effort)` 的 position 范围约为 `[0, 0.1]`。需确认与 lerobot 数据格式的对齐。
-
-4. **安全机制**
-   - 断连流程：当前 `disconnect()` 中先 `safe_disconnect()`（移到安全位置），等待 5 秒，再 disable。需要验证 `piper_control` 是否提供了更可靠的关闭序列。
-   - 急停（e-stop）：当前代码中未实现键盘急停。`piper_control` 提供了软件层 e-stop 能力，应在控制循环中集成。
-
-5. **相机集成**
-   - `PIPERFollowerConfig` 中相机配置已注释掉（默认空 dict）。实际采集时需要配置 OpenCV 相机。
-
-6. **端到端验证**
-   - 最终需要通过 `lerobot-record --robot.type=piper_follower --teleop.type=piper_leader ...` 完成一次完整的数据采集，确认数据格式、帧率、关节角度范围均正确。
-
-## 关键路径（依赖顺序）
+## 仓库结构（适配相关部分）
 
 ```
-PiperMotorsBus 完整实现 (piper.py)
-    ↓
-PIPERFollower + PIPERLeader 调通 (调用 PiperMotorsBus)
-    ↓
-框架注册 (lerobot_record.py 可识别 piper_follower / piper_leader)
-    ↓
-单机遥操作测试 (主臂读 → 从臂写)
-    ↓
-lerobot-record 端到端数据采集
-    ↓
-ACT 模型训练与评估
+src/lerobot/
+├── motors/piper/
+│   ├── piper.py                  ← 主动开发：PiperMotorsBus（电机总线封装）
+│   └── ref_only_piper.py         ← 只读参考：原始 piper_sdk 实现，禁止修改
+│
+├── robots/piper_follower/
+│   ├── piper_follower.py         ← 主动开发：PIPERFollower（Robot 子类）
+│   ├── config_piper_follower.py  ← PIPERFollowerConfig（已注册到框架）
+│   ├── ref_only_piper_follower.py← 只读参考，禁止修改
+│   └── __init__.py
+│
+└── teleoperators/piper_leader/
+    ├── piper_leader.py           ← 主动开发：PIPERLeader（Teleoperator 子类）
+    ├── config_piper_leader.py    ← PIPERLeaderConfig（已注册到框架）
+    ├── ref_only_piper_leader.py  ← 只读参考，禁止修改
+    └── __init__.py
+
+src/lerobot/scripts/
+└── lerobot_record.py             ← 框架主入口，适配工作最终目标，禁止修改
 ```
 
-## 文件索引
+> `ref_only_*` 文件来自 [Kane1440/lerobot_piper2](https://github.com/Kane1440/lerobot_piper2)，基于裸 `piper_sdk` 实现，仅供对照阅读，**不得修改**。
 
-### 适配代码（活跃开发）
+---
 
-| 文件 | 说明 |
-|------|------|
-| `src/lerobot/motors/piper/piper.py` | `PiperMotorsBus` — 电机总线封装（**核心，待完成**） |
-| `src/lerobot/robots/piper_follower/piper_follower.py` | `PIPERFollower` — 从臂 Robot 适配 |
-| `src/lerobot/robots/piper_follower/config_piper_follower.py` | 从臂配置（含相机定义） |
-| `src/lerobot/teleoperators/piper_leader/piper_leader.py` | `PIPERLeader` — 主臂遥操作适配 |
-| `src/lerobot/teleoperators/piper_leader/config_piper_leader.py` | 主臂配置 |
+## 调用链与接口关系
 
-### 参考代码（只读，基于 piper_sdk）
+```
+lerobot-record
+    │
+    ├── Robot: PIPERFollower          (robots/piper_follower/piper_follower.py)
+    │       └── PiperMotorsBus        (motors/piper/piper.py)
+    │               └── piper_control.piper_interface.PiperInterface   ← CAN 通信
+    │
+    └── Teleoperator: PIPERLeader     (teleoperators/piper_leader/piper_leader.py)
+            └── PiperMotorsBus        (motors/piper/piper.py)
+                    └── piper_control.piper_interface.PiperInterface   ← CAN 通信
+```
 
-| 文件 | 说明 |
-|------|------|
-| `src/lerobot/motors/piper/ref_only_piper.py` | 参考 PiperMotorsBus 实现 |
-| `src/lerobot/robots/piper_follower/ref_only_piper_follower.py` | 参考 PIPERFollower 实现 |
-| `src/lerobot/teleoperators/piper_leader/ref_only_piper_leader.py` | 参考 PIPERLeader 实现 |
+`lerobot-record` 的调用流程（每 episode）：
+1. `robot.connect()` → `bus.connect(enable=True)` → CAN 使能 + `robot.calibrate()`
+2. `teleop.connect()` → `bus.connect(enable=True)` → 主臂使能 + 失能（允许手动拖动）
+3. 循环：`teleop.get_action()` → `robot.send_action(action)` → `robot.get_observation()`
+4. `robot.disconnect()` → `bus.safe_shutdown()` → 回安全位 + 失能
 
-### 框架入口
+---
 
-| 文件 | 说明 |
-|------|------|
-| `src/lerobot/scripts/lerobot_record.py` | 数据采集主脚本 |
-| `src/lerobot/robots/robot.py` | `Robot` 抽象基类 |
-| `src/lerobot/teleoperators/teleoperator.py` | `Teleoperator` 抽象基类 |
+## 各模块当前状态
 
-## 硬件信息
+### `motors/piper/piper.py` — PiperMotorsBus
 
-- **Piper 机械臂**：6 自由度关节 + 1 夹爪，通过 CAN 总线通信。
-- 典型配置：一对 Piper 臂（主臂 + 从臂），主臂用于遥操作，从臂执行动作。
-- CAN 端口命名约定：从臂 `can_follower`，主臂 `can_master`。
+| 方法 | 状态 | 说明 |
+|------|------|------|
+| `connect_can()` | ✅ 可用 | 发现并激活 CAN 端口 |
+| `connect(enable=True)` | ✅ 基本可用 | 使能臂和夹爪，有多次采样防误判 |
+| `connect(enable=False)` | ⚠️ 有重复 | 调用 safe_shutdown()，但 disconnect() 也已调用一次 |
+| `read()` | ✅ 可用 | 返回 7 维 dict（joint_1..6 + gripper），单位 rad |
+| `write(target_joints)` | ❌ 有 bug | 引用了 `self.controller` 但 `__init__` 中未赋值 |
+| `apply_calibration()` | ⚠️ 待验证 | 调用 `self.controller.move_to_position()`，依赖未初始化的 controller |
+| `apply_calibration_master()` | ⚠️ 待验证 | 同上 |
+| `safe_shutdown()` | ✅ 逻辑正确 | 用 BuiltinJointPositionController 回安全位后失能 |
+| `probe_arm_enabled_state()` | ✅ 可用 | 多次采样防止单次误判 |
 
-## 相关参考资料
+**已知问题**：
+- `PiperMotorsBusConfig.port` 是类级别字段调用 `connect_can()`，会在 **import 时** 触发 CAN 连接（严重问题）
+- `self.controller` 从未在 `__init__` 中赋值；`write()`、`apply_calibration()` 等均会在运行时抛 `AttributeError`
+- `is_connected` 属性返回 `self._is_connected`，但 `connect()` 方法从未将其设为 `True`
 
-- `docs/ref_project/kkghrsbsb-piper_control_demo-*.txt` — 用户的 `piper_control_demo` 实验仓库导出，展示了 `piper_control` 库在真实硬件上的完整使用模式（连接、使能、控制、状态读取、安全关闭）。是适配工作中 `piper_control` API 用法的核心参考。
-- `docs/src/reference/piper-act-deployment/` — 知乎专栏系列文章，记录了 Piper + ACT 的部署过程。
+---
+
+### `robots/piper_follower/piper_follower.py` — PIPERFollower
+
+| 方法 | 状态 | 说明 |
+|------|------|------|
+| `connect()` | ⚠️ 部分可用 | 流程正确，但依赖有 bug 的 bus.connect/calibrate |
+| `disconnect()` | ⚠️ 逻辑冗余 | 先调 `safe_shutdown()` 再调 `connect(enable=False)`，后者重复 shutdown |
+| `calibrate()` | ⚠️ 待验证 | 调用 `bus.apply_calibration()`，依赖 controller |
+| `get_observation()` | ✅ 逻辑正确 | 读关节 + 相机图像，返回 obs dict |
+| `send_action()` | ⚠️ 待验证 | 调用 `bus.write()`，依赖未修复的 write() |
+| `motor_features` / `action_features` | ✅ 可用 | 格式符合框架要求 |
+
+**已知问题**：
+- import 路径错误：`from lerobot.utils.errors` 应为 `from lerobot.errors`
+- `is_connected` 在 connect() 结束时更新逻辑有误（相机循环中 `and` 初始为 False 导致永远 False）
+
+---
+
+### `teleoperators/piper_leader/piper_leader.py` — PIPERLeader
+
+| 方法 | 状态 | 说明 |
+|------|------|------|
+| `connect()` | ⚠️ 部分可用 | 流程正确，但依赖有 bug 的 bus.connect |
+| `calibrate()` | ⚠️ 待验证 | 调用 `bus.apply_calibration_master()` |
+| `get_action()` | ✅ 逻辑正确 | 调用 `bus.read()`，已验证 read() 可用 |
+| `disconnect()` | ❌ 有 bug | 调用 `bus.safe_disconnect()`，但该方法不存在（应为 `safe_shutdown()`） |
+| `action_features` | ✅ 正确 | 7 维 float dict |
+
+**已知问题**：
+- `PiperMotorsBusConfig(port="can_master", ...)` 传入字符串，但类字段已 override 为 `connect_can()` 的结果
+
+---
+
+## 待完成工作（按优先级）
+
+### P0 — 阻塞 end-to-end 运行的 bug
+
+1. **`PiperMotorsBusConfig.port` 不应在类定义时调用 `connect_can()`**
+   - 需改为实例级别初始化或传入参数
+2. **`self.controller` 未在 `__init__` 中初始化**
+   - `PiperMotorsBus` 需要在 `connect(enable=True)` 内创建 `BuiltinJointPositionController` 并挂到 `self.controller`
+3. **`piper_leader.disconnect()` 调用不存在的 `bus.safe_disconnect()`**
+   - 改为 `bus.safe_shutdown()`
+4. **`piper_follower.py` 错误 import 路径**
+   - `from lerobot.utils.errors` → `from lerobot.errors`
+
+### P1 — 逻辑不完整
+
+5. **`is_connected` 状态跟踪不正确**（`PiperMotorsBus` 的 `_is_connected` 始终为 False）
+6. **`PIPERFollower.disconnect()` 双重 shutdown**（先 `safe_shutdown()` 再 `connect(enable=False)`）
+7. **相机连接状态检测逻辑有误**（初始值 False 与 `and` 运算符冲突）
+
+### P2 — 功能增强
+
+8. **键盘急停（e-stop）集成**（CLAUDE.md 要求评估复用 BuiltinJointPositionController 键盘急停能力）
+9. **相机配置完善**（`config_piper_follower.py` 中相机配置已注释掉，需按实际硬件补全）
+10. **end-to-end 联调**：用实体 Piper 运行 `lerobot-record`
+
+---
+
+## 依赖关系
+
+| 依赖 | 用途 | 安装方式 |
+|------|------|----------|
+| `piper_control` | Piper 高层控制 API | `uv add piper-control` |
+| `piper_sdk` | piper_control 的底层依赖，CAN 通信 | 随 piper_control 自动安装 |
+| `lerobot` 框架 | Robot / Teleoperator 基类，record 脚本 | 当前 repo（fork） |
+
+`piper_control` 核心 API：
+- `piper_connect.find_ports()` / `activate()` / `active_ports()`
+- `piper_interface.PiperInterface(can_port=...)` — 主通信对象
+- `piper_init.reset_arm()` / `reset_gripper()` / `disable_arm()`
+- `piper_control.BuiltinJointPositionController` — 内置位置控制器（context manager）
+- `robot.get_joint_positions()` / `get_gripper_state()` — 读取
+- `robot.command_gripper()` — 夹爪指令
+
+---
+
+## 安全注意事项
+
+- 在任何含 `BuiltinJointPositionController` 的控制循环中，应评估并复用软件层键盘急停能力。
+- `safe_shutdown()` 在失能前会先运动到 `SAFE_DISABLE_POSITION`（`[0, 0, 0, 0.02, 0.5, 0]` rad），失能后臂会掉落，操作前须确认周边安全。
+- 不得在未确认的情况下删除或弱化急停、关节限位检查等安全机制。
+
+---
+
+## 参考资料
+
+- 参考实现来源：[Kane1440/lerobot_piper2](https://github.com/Kane1440/lerobot_piper2)（使用裸 piper_sdk，见 `ref_only_*` 文件）
+- 框架上游：[huggingface/lerobot](https://github.com/huggingface/lerobot)
+- 用户的 piper_control 实验笔记：见 memory 中 `reference_piper_control_demo.md`

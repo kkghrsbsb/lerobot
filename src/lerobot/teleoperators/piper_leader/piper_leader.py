@@ -3,7 +3,7 @@
 import logging
 import time
 
-from lerobot.errors import DeviceAlreadyConnectedError, DeviceNotConnectedError
+from lerobot.utils.errors import DeviceAlreadyConnectedError, DeviceNotConnectedError
 from lerobot.motors.piper.piper import PiperMotorsBus, PiperMotorsBusConfig
 
 from ..teleoperator import Teleoperator
@@ -21,7 +21,6 @@ class PIPERLeader(Teleoperator):
         self.config = config
         self.bus = PiperMotorsBus(
             PiperMotorsBusConfig(
-                can_name="can_master",
                 motors={
                     "joint_1": (1, "agilex_piper"),
                     "joint_2": (2, "agilex_piper"),
@@ -86,14 +85,10 @@ class PIPERLeader(Teleoperator):
         self._is_calibrated = True
 
     def get_action(self) -> dict[str, float]:
-        """获取主臂当前动作（单位转为 rad）"""
+        """获取主臂当前动作，单位 rad（由 piper_control 内部转换，直接透传）。"""
         start = time.perf_counter()
-        action_raw = self.bus.read()  # 原始单位 0.001°
-        joint_factor = 57324.840764  # 度转弧度比例因子（可调）
-        action = {
-            f"{motor}.pos": val / joint_factor if motor != "gripper" else val / 1_000_000
-            for motor, val in action_raw.items()
-        }
+        action_raw = self.bus.read()
+        action = {f"{motor}.pos": val for motor, val in action_raw.items()}
         dt_ms = (time.perf_counter() - start) * 1e3
         logger.debug(f"{self} read action: {dt_ms:.1f}ms")
         return action
@@ -103,5 +98,5 @@ class PIPERLeader(Teleoperator):
         if not self._is_connected:
             raise DeviceNotConnectedError(f"{self} is not connected.")
 
-        self.bus.safe_disconnect()
+        self.bus.safe_shutdown()
         self._is_connected = False

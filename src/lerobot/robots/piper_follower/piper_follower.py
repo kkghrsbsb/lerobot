@@ -28,7 +28,6 @@ class PIPERFollower(Robot):
         self.config = config
         self.bus = PiperMotorsBus(
             PiperMotorsBusConfig(
-                can_name="can_follower",
                 motors={
                     "joint_1": (1, "agilex_piper"),
                     "joint_2": (2, "agilex_piper"),
@@ -42,7 +41,6 @@ class PIPERFollower(Robot):
         )
         self.logs = {}
         self._is_connected = False
-        self._is_calibrated = False
         self.cameras = make_cameras_from_configs(config.cameras)
 
     @property
@@ -131,7 +129,8 @@ class PIPERFollower(Robot):
         # connect cameras
         for name in self.cameras:
             self.cameras[name].connect()
-            self._is_connected = self._is_connected and self.cameras[name].is_connected
+            if not self.cameras[name].is_connected:
+                raise RuntimeError(f"Camera {name} failed to connect")
             print(f"camera {name} connected")
 
         print("All connected")
@@ -141,9 +140,8 @@ class PIPERFollower(Robot):
 
     def disconnect(self) -> None:
         """move to home position, disenable piper and cameras"""
-        self.bus.safe_disconnect()
-        print("piper disable after 5 seconds")
-        time.sleep(5)
+        print("piper disable after 2 seconds")
+        time.sleep(2)
         self.bus.connect(enable=False)
 
         if len(self.cameras) > 0:
@@ -158,7 +156,6 @@ class PIPERFollower(Robot):
             raise ConnectionError()
 
         self.bus.apply_calibration()
-        self._is_calibrated = True  # 标记为已标定
 
     def get_observation(self) -> dict:
         """Capture current joint positions and camera images"""
