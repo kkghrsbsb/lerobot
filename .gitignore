@@ -169,6 +169,7 @@ wandb/
 # Data folders
 data/
 outputs/
+tests/cameras/sspu/outputs/
 
 # Translations
 *.mo

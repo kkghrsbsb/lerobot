@@ -58,7 +58,7 @@ lerobot-record
 
 `lerobot-record` 的调用流程（每 episode）：
 1. `robot.connect()` → `bus.connect(enable=True)` → CAN 使能 + `robot.calibrate()`
-2. `teleop.connect()` → `bus.connect(enable=True)` → 主臂使能 + 失能（允许手动拖动）
+2. `teleop.connect()` → `bus.connect(enable=True)` → 主臂使能（允许手动拖动读取位置）
 3. 循环：`teleop.get_action()` → `robot.send_action(action)` → `robot.get_observation()`
 4. `robot.disconnect()` → `bus.safe_shutdown()` → 回安全位 + 失能
 
@@ -71,19 +71,18 @@ lerobot-record
 | 方法 | 状态 | 说明 |
 |------|------|------|
 | `connect_can()` | ✅ 可用 | 发现并激活 CAN 端口 |
-| `connect(enable=True)` | ✅ 基本可用 | 使能臂和夹爪，有多次采样防误判 |
-| `connect(enable=False)` | ⚠️ 有重复 | 调用 safe_shutdown()，但 disconnect() 也已调用一次 |
+| `connect(enable=True)` | ✅ 可用 | 使能臂和夹爪，末尾正确设置 `_is_connected = True` |
+| `connect(enable=False)` | ✅ 可用 | 调用 `safe_shutdown()` 后设 `_is_connected = False` |
 | `read()` | ✅ 可用 | 返回 7 维 dict（joint_1..6 + gripper），单位 rad |
-| `write(target_joints)` | ❌ 有 bug | 引用了 `self.controller` 但 `__init__` 中未赋值 |
-| `apply_calibration()` | ⚠️ 待验证 | 调用 `self.controller.move_to_position()`，依赖未初始化的 controller |
-| `apply_calibration_master()` | ⚠️ 待验证 | 同上 |
-| `safe_shutdown()` | ✅ 逻辑正确 | 用 BuiltinJointPositionController 回安全位后失能 |
+| `write(target_joints)` | ✅ 可用 | 直接调用 `robot.command_joint_positions()` 和 `command_gripper()`，不再依赖 `self.controller` |
+| `apply_calibration()` | ✅ 可用 | 通过 `builtin_control_move()` 移动到 `INIT_JOINT_POSITION` |
+| `apply_calibration_master()` | ✅ 可用 | 同上 |
+| `safe_shutdown()` | ✅ 可用 | 通过 `builtin_control_move()` 回 `SAFE_DISABLE_POSITION` 后失能 |
 | `probe_arm_enabled_state()` | ✅ 可用 | 多次采样防止单次误判 |
+| `builtin_control_move()` | ✅ 可用 | 封装阻塞式位置移动，供 calibration 和 shutdown 复用 |
 
 **已知问题**：
-- `PiperMotorsBusConfig.port` 是类级别字段调用 `connect_can()`，会在 **import 时** 触发 CAN 连接（严重问题）
-- `self.controller` 从未在 `__init__` 中赋值；`write()`、`apply_calibration()` 等均会在运行时抛 `AttributeError`
-- `is_connected` 属性返回 `self._is_connected`，但 `connect()` 方法从未将其设为 `True`
+- `PiperMotorsBusConfig.port` 使用 `field(default_factory=connect_can)`，实例化 Config 时即触发 CAN 连接；如果需要在无硬件环境下 import 或测试，需改为延迟初始化
 
 ---
 
@@ -91,16 +90,15 @@ lerobot-record
 
 | 方法 | 状态 | 说明 |
 |------|------|------|
-| `connect()` | ⚠️ 部分可用 | 流程正确，但依赖有 bug 的 bus.connect/calibrate |
-| `disconnect()` | ⚠️ 逻辑冗余 | 先调 `safe_shutdown()` 再调 `connect(enable=False)`，后者重复 shutdown |
-| `calibrate()` | ⚠️ 待验证 | 调用 `bus.apply_calibration()`，依赖 controller |
-| `get_observation()` | ✅ 逻辑正确 | 读关节 + 相机图像，返回 obs dict |
-| `send_action()` | ⚠️ 待验证 | 调用 `bus.write()`，依赖未修复的 write() |
+| `connect()` | ✅ 可用 | 调用 bus.connect(enable=True) → calibrate()，相机失败时 raise RuntimeError |
+| `disconnect()` | ✅ 可用 | 等待 2s 后调用 bus.connect(enable=False)（单路 shutdown，无重复） |
+| `calibrate()` | ✅ 可用 | 调用 bus.apply_calibration()，is_calibrated 状态由 bus 维护 |
+| `get_observation()` | ✅ 可用 | 读关节 + 相机图像，返回 obs dict |
+| `send_action()` | ✅ 可用 | 调用 bus.write(target_joints)，write() 已修复 |
+| `is_connected` | ✅ 正确 | 委托给 bus.is_connected 且对所有相机做 and 检查 |
 | `motor_features` / `action_features` | ✅ 可用 | 格式符合框架要求 |
 
-**已知问题**：
-- import 路径错误：`from lerobot.utils.errors` 应为 `from lerobot.errors`
-- `is_connected` 在 connect() 结束时更新逻辑有误（相机循环中 `and` 初始为 False 导致永远 False）
+无已知阻塞性问题。
 
 ---
 
@@ -108,41 +106,29 @@ lerobot-record
 
 | 方法 | 状态 | 说明 |
 |------|------|------|
-| `connect()` | ⚠️ 部分可用 | 流程正确，但依赖有 bug 的 bus.connect |
-| `calibrate()` | ⚠️ 待验证 | 调用 `bus.apply_calibration_master()` |
-| `get_action()` | ✅ 逻辑正确 | 调用 `bus.read()`，已验证 read() 可用 |
-| `disconnect()` | ❌ 有 bug | 调用 `bus.safe_disconnect()`，但该方法不存在（应为 `safe_shutdown()`） |
+| `connect()` | ✅ 可用 | 调用 bus.connect(enable=True)，依赖 bus（已修复） |
+| `calibrate()` | ✅ 可用 | 调用 `bus.apply_calibration_master()`（已修复） |
+| `get_action()` | ✅ 可用 | 直接透传 bus.read() 返回值（已去除手动 joint_factor 换算） |
+| `disconnect()` | ✅ 可用 | 调用 `bus.safe_shutdown()`（已从不存在的 safe_disconnect 修正） |
 | `action_features` | ✅ 正确 | 7 维 float dict |
 
-**已知问题**：
-- `PiperMotorsBusConfig(port="can_master", ...)` 传入字符串，但类字段已 override 为 `connect_can()` 的结果
+无已知阻塞性问题。
 
 ---
 
 ## 待完成工作（按优先级）
 
-### P0 — 阻塞 end-to-end 运行的 bug
+### P0 — 尚存的阻塞性问题
 
-1. **`PiperMotorsBusConfig.port` 不应在类定义时调用 `connect_can()`**
-   - 需改为实例级别初始化或传入参数
-2. **`self.controller` 未在 `__init__` 中初始化**
-   - `PiperMotorsBus` 需要在 `connect(enable=True)` 内创建 `BuiltinJointPositionController` 并挂到 `self.controller`
-3. **`piper_leader.disconnect()` 调用不存在的 `bus.safe_disconnect()`**
-   - 改为 `bus.safe_shutdown()`
-4. **`piper_follower.py` 错误 import 路径**
-   - `from lerobot.utils.errors` → `from lerobot.errors`
+1. **`PiperMotorsBusConfig.port` 在实例化 Config 时即触发 CAN 连接**
+   - 当前用 `field(default_factory=connect_can)` 实现；只要创建 Config 对象就会扫描 CAN 端口
+   - 需改为：构造时接受字符串参数，由 `PiperMotorsBus.connect()` 在运行时调用 `connect_can()`
 
-### P1 — 逻辑不完整
+### P1 — 功能增强
 
-5. **`is_connected` 状态跟踪不正确**（`PiperMotorsBus` 的 `_is_connected` 始终为 False）
-6. **`PIPERFollower.disconnect()` 双重 shutdown**（先 `safe_shutdown()` 再 `connect(enable=False)`）
-7. **相机连接状态检测逻辑有误**（初始值 False 与 `and` 运算符冲突）
-
-### P2 — 功能增强
-
-8. **键盘急停（e-stop）集成**（CLAUDE.md 要求评估复用 BuiltinJointPositionController 键盘急停能力）
-9. **相机配置完善**（`config_piper_follower.py` 中相机配置已注释掉，需按实际硬件补全）
-10. **end-to-end 联调**：用实体 Piper 运行 `lerobot-record`
+2. **键盘急停（e-stop）集成**：在控制循环中评估并复用 `BuiltinJointPositionController` 的软件层急停能力（见 CLAUDE.md 安全规则）
+3. **相机配置完善**：`config_piper_follower.py` 中相机字段已注释，需按实际硬件填写
+4. **end-to-end 联调**：用实体 Piper 运行 `lerobot-record --robot.type=piper_follower --teleop.type=piper_leader`
 
 ---
 

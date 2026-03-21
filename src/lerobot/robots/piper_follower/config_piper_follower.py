@@ -18,27 +18,22 @@ from dataclasses import dataclass, field
 
 from lerobot.cameras import CameraConfig
 
-from ..config import RobotConfig
+from lerobot.robots import RobotConfig
+from lerobot.cameras.opencv import OpenCVCameraConfig
 
 
 @RobotConfig.register_subclass("piper_follower")
 @dataclass
 class PIPERFollowerConfig(RobotConfig):
-    cameras: dict[str, CameraConfig] = field(default_factory=dict)
-    # # cameras
-    # cameras: dict[str, CameraConfig] = field(
-    #     default_factory=lambda: {
-    #         "one": OpenCVCameraConfig(
-    #             index_or_path=0,
-    #             fps=30,
-    #             width=640,
-    #             height=480,
-    #         ),
-    #         "two": OpenCVCameraConfig(
-    #             index_or_path=4,
-    #             fps=30,
-    #             width=640,
-    #             height=480,
-    #         ),
-    #     }
-    # )
+    # cameras: dict[str, CameraConfig] = field(default_factory=dict)
+
+    cameras: dict[str, CameraConfig] = field(
+        default_factory={
+            "cam_1": OpenCVCameraConfig(
+                index_or_path=2,
+                fps=30,
+                width=640,
+                height=480,
+            ),
+        }
+    )
