@@ -47,8 +47,7 @@ class PIPERFollower(Robot):
     def camera_features(self) -> dict:
         cam_ft = {}
         for cam_key, cam in self.cameras.items():
-            key = f"observation.images.{cam_key}"
-            cam_ft[key] = {
+            cam_ft[cam_key] = {
                 "shape": (cam.height, cam.width, cam.channels),
                 "names": ["height", "width", "channels"],
                 "info": None,
@@ -82,9 +81,14 @@ class PIPERFollower(Robot):
 
     @property
     def _cameras_ft(self) -> dict[str, tuple]:
-        """用于 record/replay 的相机图像描述"""
+        """用于 record/replay 的相机图像描述。
+
+        key 使用裸相机名（如 "cam"），由框架的 hw_to_dataset_features
+        自动添加 "observation.images." 前缀。与 get_observation() 返回
+        的 key 保持一致。
+        """
         return {
-            f"observation.images.{cam_key}": (cam.height, cam.width, 3)
+            cam_key: (cam.height, cam.width, 3)
             for cam_key, cam in self.cameras.items()
         }
 
@@ -166,9 +170,9 @@ class PIPERFollower(Robot):
         state = self.bus.read()  # e.g., {'joint_1': 0.1, ..., 'gripper': 0.0}
         obs_dict = {f"{joint}.pos": float(val) for joint, val in state.items()}
 
-        # 读取图像
+        # 读取图像（key 使用裸相机名，与 _cameras_ft / observation_features 一致）
         for name, cam in self.cameras.items():
-            obs_dict[f"observation.images.{name}"] = cam.async_read()
+            obs_dict[name] = cam.async_read()
 
         return obs_dict
 

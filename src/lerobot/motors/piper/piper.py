@@ -1,39 +1,36 @@
 import time
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 
 from piper_control import piper_connect, piper_control, piper_init, piper_interface
 
-# 用于 builtin_control_move
-# 单次运动最大允许时长，超过时自动停止
+# builtin_control_move
 MOVE_TIMEOUT_SECONDS = 12.0
-# 到位判定阈值
 MOVE_THRESHOLD = 0.01
 
-# 关节初始位（回零位），6 关节，单位 rad
+# 6 joints, rad
 INIT_JOINT_POSITION = [0.0, 0.0, 0.0, 0.0, 0.0, 0.0]
-# 失能前的安全位，单位 rad
+# safe position before disable, rad
 SAFE_DISABLE_POSITION = [0.0, 0.0, 0.0, 0.02, 0.5, 0.0]
 
-# 夹爪初始位，单位与 piper_control 的 command_gripper() 一致
 INIT_GRIPPER_POSITION = 0.0
-# 夹爪夹持时允许施加的力 range: [0, 2]
+# gripper effort range: [0, 2]
 GRIPPER_EFFORT_NOW = 0.5
 
-# 内置位置控制器速度（范围 0-100），低值更安全
+# builtin position controller speed (0-100)
 JOINT_SAFE_SPEED = 10
 
 
-# 要以后插入 USB 自动读入 CAN 一劳永逸，请运行根目录下 piper-generate-udev-rule
+# To auto-activate CAN on USB plug, run piper-generate-udev-rule at repo root:
 # sudo ./piper-generate-udev-rule -i can0 -b 1000000
 # from: https://github.com/Reimagine-Robotics/piper_control/blob/main/scripts/piper-generate-udev-rule
 def connect_can():
-    """连接到 Piper 的 CAN 接口并返回已激活的 CAN 端口名称列表。
+    """Find and activate Piper CAN ports.
 
     Returns:
-        list[str]: 激活后的 CAN 端口列表（例如 ["can0"]）
+        list[str]: active CAN port names (e.g. ["can0"])
 
     Raises:
-        ValueError: 如果未发现任何已激活的 CAN 端口，则抛出异常提示用户检查连接
+        ValueError: if no active CAN ports found
     """
     ports = piper_connect.find_ports()
     print(f"Piper ports: {ports}")
@@ -50,19 +47,22 @@ def connect_can():
 @dataclass
 class PiperMotorsBusConfig:
     motors: dict[str, tuple[int, str]]
-    port: list[str] = field(default_factory=connect_can)
+    # CAN port name. None = auto-discover in connect().
+    port: str | None = None
 
 
 class PiperMotorsBus:
-    """
-    基于 piper_control 的 Piper 机械臂“电机总线”封装。
+    """Piper motor bus based on piper_control.
+
+    PiperInterface is lazily created in connect() to avoid triggering
+    CAN discovery on import or Config instantiation.
     """
 
     def __init__(self, config: PiperMotorsBusConfig) -> None:
         self.motors = config.motors
-        self.robot = piper_interface.PiperInterface(can_port=config.port[0])
+        self._config_port = config.port
+        self.robot: piper_interface.PiperInterface | None = None
         self._is_connected = False
-        # 借用接口，“已标定”被复用为"回零位"操作
         self._is_calibrated = False
 
     @property
@@ -91,10 +91,7 @@ class PiperMotorsBus:
             sample_count=5,
             sample_interval=0.05,
     ):
-        """通过多次采样状态来探测机械臂是否已使能。"""
-
-        # Allow status feedback to settle after reconnect, then sample multiple
-        # times to avoid one-shot false negatives.
+        """Probe arm enabled state via multiple samples."""
         time.sleep(settle_seconds)
         enabled_samples = []
         for _ in range(sample_count):
@@ -115,8 +112,7 @@ class PiperMotorsBus:
             sample_count=5,
             sample_interval=0.05,
     ):
-        """通过多次采样状态来探测夹爪是否已使能。"""
-
+        """Probe gripper enabled state via multiple samples."""
         time.sleep(settle_seconds)
         enabled_samples = []
         for _ in range(sample_count):
@@ -138,7 +134,7 @@ class PiperMotorsBus:
             threshold=MOVE_THRESHOLD,
             timeout=MOVE_TIMEOUT_SECONDS,
     ):
-        """"阻塞式移动，采用内置默认关节位控制器上下文安全移动到固定位置"""
+        """Blocking move to a fixed position using BuiltinJointPositionController."""
         with piper_control.BuiltinJointPositionController(
                 self.robot,
                 rest_position=None,
@@ -153,20 +149,34 @@ class PiperMotorsBus:
             print(f"reached target: {success}")
 
     def safe_shutdown(self):
-        """运动到一个安全位置失能机械臂和夹爪"""
+        """Move to safe position then disable arm and gripper."""
         self.builtin_control_move(reach_position=SAFE_DISABLE_POSITION)
 
         time.sleep(1)
         self.robot.disable_gripper()
         self.robot.disable_arm()
 
+    def _ensure_robot(self) -> None:
+        """Lazily create PiperInterface: discover CAN ports and connect."""
+        if self.robot is not None:
+            return
+        ports = connect_can()
+        port = self._config_port if self._config_port else ports[0]
+        if port not in ports:
+            raise ValueError(
+                f"Configured port '{port}' not found in active CAN ports: {ports}"
+            )
+        self.robot = piper_interface.PiperInterface(can_port=port)
+        print(f"PiperInterface created on port: {port}")
+
     def connect(self, enable: bool) -> None:
-        """使能或失能机械臂。
+        """Enable or disable the arm.
 
         Args:
-            enable: True 为使能（启动控制器），False 为失能（停止控制器并断开）。
+            enable: True to enable (start controller), False to disable (shutdown).
         """
         if enable:
+            self._ensure_robot()
             is_arm_enabled = self.probe_arm_enabled_state()
             if not is_arm_enabled:
                 print("resetting arm")
@@ -201,21 +211,21 @@ class PiperMotorsBus:
         return
 
     def apply_calibration(self) -> None:
-        """移动到初始位置"""
+        """Move to init (zero) position."""
         self.builtin_control_move(reach_position=INIT_JOINT_POSITION)
         self._is_calibrated = True
 
     def apply_calibration_master(self) -> None:
-        """master移动到初始位置"""
+        """Move master arm to init (zero) position."""
         self.builtin_control_move(reach_position=INIT_JOINT_POSITION)
         self._is_calibrated = True
 
     def read(self) -> dict[str, float]:
-        """读取当前关节位置和夹爪状态。
+        """Read current joint positions and gripper state.
 
         Returns:
-            dict，键为 joint_1..joint_6 和 gripper，值为弧度（rad）。
-            piper_control 已内部完成单位转换，返回值直接是 rad，无需额外换算。
+            dict with keys joint_1..joint_6 and gripper, values in rad.
+            piper_control handles unit conversion internally.
         """
         joints = self.robot.get_joint_positions()
         gripper_pos, _ = self.robot.get_gripper_state()
@@ -230,10 +240,10 @@ class PiperMotorsBus:
         }
 
     def write(self, target_joints: list[float]) -> None:
-        """发送关节位置指令。
+        """Send joint position command.
 
         Args:
-            target_joints: 长度为 7 的列表 [j1, j2, j3, j4, j5, j6, gripper]，单位 rad。
+            target_joints: list of 7 floats [j1..j6, gripper], in rad.
         """
         q = [float(x) for x in target_joints[:6]]
 

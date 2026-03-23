@@ -1,6 +1,5 @@
-from piper_control import piper_init, piper_interface
+# ！如果碰过link5上面的按键，在这个程序启动的时候就会失能！
 from lerobot.motors.piper.piper import PiperMotorsBus, PiperMotorsBusConfig
-
 
 if __name__ == '__main__':
     bus = PiperMotorsBus(
@@ -17,4 +16,5 @@ if __name__ == '__main__':
         )
     )
     input("WARNING: the robot will be disabled. Press Enter to continue...")
-    piper_init.disable_arm(bus.robot)
+    bus.robot.disable_safe()
+    bus.robot.disable_gripper()

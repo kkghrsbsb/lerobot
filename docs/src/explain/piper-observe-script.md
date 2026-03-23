@@ -103,9 +103,10 @@ obs = robot.get_observation()
 ### 3.2 echo action 提取
 
 ```python
+# 只取 action_features 中声明的 key（关节+夹爪），排除相机
 action_values = {
     k: v for k, v in obs_processed.items()
-    if not k.startswith("observation.images.")
+    if k in robot.action_features
 }
 # action_values = {
 #     "joint_1.pos": 0.12,
@@ -115,7 +116,8 @@ action_values = {
 # }
 ```
 
-键名与 `robot.action_features` 完全一致（都是 `"joint_N.pos"` 和 `"gripper.pos"`）。
+用 `robot.action_features` 的 key 集合做过滤，比硬编码前缀更健壮。
+相机 key 现在是裸名（如 `"cam"`），不会被误匹配。
 
 ### 3.3 frame 构建
 
@@ -241,8 +243,8 @@ dataset_features = combine_feature_dicts(
 
 ## 六、已知限制与风险
 
-| 风险 | 说明 | 缓解方案 |
-|------|------|---------|
-| CAN 通信冲突 | 采集脚本 `connect(enable=True)` 使能机械臂后，外部控制脚本也通过 CAN 发命令，可能冲突 | 需硬件验证；如有冲突，考虑新建 observe-only Robot 子类，connect 时不使能 |
-| 图像 key 前缀 | PIPERFollower.get_observation() 返回 `"observation.images.cam"` 作为 key，build_dataset_frame 期望不带前缀的 `"cam"` | 需硬件测试验证；如有 KeyError，调整 get_observation 的 key 命名 |
-| `PiperMotorsBusConfig.port` | default_factory 在 Config 实例化时即触发 CAN 连接 | P0 待修复 |
+| 风险 | 状态 | 说明 |
+|------|------|------|
+| CAN 通信冲突 | **已验证无冲突** | 通过 `tests/piper/test_observe_connect.py` + `test_can_coexist.py` 确认：采集脚本 `connect(enable=True)` 使能后，外部控制脚本通过独立 PiperInterface 连接同一 CAN 总线可正常共存读写（2026-03-23 验证） |
+| 图像 key 前缀 | **已修复** | `_cameras_ft` 和 `get_observation()` 已改为使用裸相机名（如 `"cam"`），与框架其他 Robot 实现一致（OpenArmFollower、LeKiwi 等均使用裸名）。`hw_to_dataset_features` 自动添加 `"observation.images."` 前缀 |
+| `PiperMotorsBusConfig.port` | **已修复** | `port` 字段改为 `str | None = None`，CAN 发现延迟到 `_ensure_robot()`（首次 `connect()` 时调用）。Config 实例化和 Bus 创建均不再触发 CAN 连接 |

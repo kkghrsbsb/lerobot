@@ -103,11 +103,10 @@ def observe_loop(
         obs_processed = robot_observation_processor(obs)
 
         # 2. Echo action: 用当前关节状态作为 action
-        #    obs_processed 包含 "joint_1.pos", ..., "gripper.pos" 和 "observation.images.*"
-        #    action 只需要关节部分（与 robot.action_features 的 keys 一致）
+        #    只取 action_features 中声明的 key（关节+夹爪），排除相机
         action_values = {
             k: v for k, v in obs_processed.items()
-            if not k.startswith("observation.images.")
+            if k in robot.action_features
         }
 
         # 3. 构建 dataset frame 并存储

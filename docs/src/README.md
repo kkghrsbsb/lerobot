@@ -92,7 +92,8 @@ piper-observe
 | 方法 | 状态 | 说明 |
 |------|------|------|
 | `connect_can()` | ✅ 可用 | 发现并激活 CAN 端口 |
-| `connect(enable=True)` | ✅ 可用 | 使能臂和夹爪，末尾正确设置 `_is_connected = True` |
+| `_ensure_robot()` | ✅ 可用 | 延迟创建 PiperInterface：首次 connect 时发现 CAN 端口并建立连接 |
+| `connect(enable=True)` | ✅ 可用 | 调用 `_ensure_robot()` 后使能臂和夹爪，末尾设 `_is_connected = True` |
 | `connect(enable=False)` | ✅ 可用 | 调用 `safe_shutdown()` 后设 `_is_connected = False` |
 | `read()` | ✅ 可用 | 返回 7 维 dict（joint_1..6 + gripper），单位 rad |
 | `write(target_joints)` | ✅ 可用 | 直接调用 `robot.command_joint_positions()` 和 `command_gripper()`，不再依赖 `self.controller` |
@@ -102,8 +103,7 @@ piper-observe
 | `probe_arm_enabled_state()` | ✅ 可用 | 多次采样防止单次误判 |
 | `builtin_control_move()` | ✅ 可用 | 封装阻塞式位置移动，供 calibration 和 shutdown 复用 |
 
-**已知问题**：
-- `PiperMotorsBusConfig.port` 使用 `field(default_factory=connect_can)`，实例化 Config 时即触发 CAN 连接；如果需要在无硬件环境下 import 或测试，需改为延迟初始化
+无已知阻塞性问题。`PiperMotorsBusConfig.port` 已改为 `str | None = None`，CAN 发现延迟到 `connect()` 时执行。
 
 ---
 
@@ -114,7 +114,7 @@ piper-observe
 | `connect()` | ✅ 可用 | 调用 bus.connect(enable=True) → calibrate()，相机失败时 raise RuntimeError |
 | `disconnect()` | ✅ 可用 | 等待 2s 后调用 bus.connect(enable=False)（单路 shutdown，无重复） |
 | `calibrate()` | ✅ 可用 | 调用 bus.apply_calibration()，is_calibrated 状态由 bus 维护 |
-| `get_observation()` | ✅ 可用 | 读关节 + 相机图像，返回 obs dict |
+| `get_observation()` | ✅ 可用 | 读关节 + 相机图像，返回 obs dict（图像 key 使用裸相机名） |
 | `send_action()` | ✅ 可用 | 调用 bus.write(target_joints)，write() 已修复 |
 | `is_connected` | ✅ 正确 | 委托给 bus.is_connected 且对所有相机做 and 检查 |
 | `motor_features` / `action_features` | ✅ 可用 | 格式符合框架要求 |
@@ -139,18 +139,21 @@ piper-observe
 
 ## 待完成工作（按优先级）
 
-### P0 — 尚存的阻塞性问题
+无 P0 级阻塞问题。
 
-1. **`PiperMotorsBusConfig.port` 在实例化 Config 时即触发 CAN 连接**
-   - 当前用 `field(default_factory=connect_can)` 实现；只要创建 Config 对象就会扫描 CAN 端口
-   - 需改为：构造时接受字符串参数，由 `PiperMotorsBus.connect()` 在运行时调用 `connect_can()`
+### P1 — 待硬件验证
 
-### P1 — 功能增强
+1. **`piper-observe` 端到端验证**：在实体 Piper 上运行单臂纯观测采集，同时用外部脚本控制运动
 
-2. **硬件验证 `piper-observe` 脚本**：在实体 Piper 上运行单臂纯观测采集，同时用外部脚本控制运动，确认 CAN 共存可行性
-3. **键盘急停（e-stop）集成**：在控制循环中评估并复用 `BuiltinJointPositionController` 的软件层急停能力
-4. **相机配置完善**：`config_piper_follower.py` 中相机字段需按实际硬件填写
-5. **end-to-end 联调**：用采集的数据集训练 ACT 模型，验证 echo action 方案的训练效果
+### P2 — 功能增强
+
+2. **键盘急停（e-stop）集成**：在控制循环中评估并复用 `BuiltinJointPositionController` 的软件层急停能力
+3. **相机配置完善**：`config_piper_follower.py` 中相机字段需按实际硬件填写
+4. **end-to-end 联调**：用采集的数据集训练 ACT 模型，验证 echo action 方案的训练效果
+
+### 已完成验证
+
+- **CAN 共存验证** ✅：通过 `tests/piper/test_observe_connect.py` + `test_can_coexist.py` 确认两个进程可通过同一 CAN 总线共存读写，无冲突（2026-03-23 验证）
 
 ---
 
