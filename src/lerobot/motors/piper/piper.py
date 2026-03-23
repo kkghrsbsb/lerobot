@@ -158,7 +158,7 @@ class PiperMotorsBus:
 
         time.sleep(1)
         self.robot.disable_gripper()
-        piper_init.disable_arm(self.robot)
+        self.robot.disable_arm()
 
     def connect(self, enable: bool) -> None:
         """使能或失能机械臂。

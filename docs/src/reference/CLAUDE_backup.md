@@ -34,8 +34,7 @@ These `ref_only_*` files are read-only references. Do not modify them. They show
 
 ### Core lerobot entry point
 
-- `src/lerobot/scripts/lerobot_record.py` — The primary data collection script in lerobot (main-follower teleop). Do not modify.
-- `src/lerobot/scripts/piper_observe.py` — Single-arm observe-only data collection script (echo action, no teleop). Active development.
+- `src/lerobot/scripts/lerobot_record.py` — The primary data collection script in lerobot. All adaptation work must eventually be exercisable through this script.
 
 ## Modification scope
 
@@ -43,7 +42,6 @@ These `ref_only_*` files are read-only references. Do not modify them. They show
   - `src/lerobot/motors/piper/`
   - `src/lerobot/robots/piper_follower/`
   - `src/lerobot/teleoperators/piper_leader/`
-  - `src/lerobot/scripts/piper_observe.py`
   - `docs/src/`
 - Do not modify lerobot framework code (e.g. `src/lerobot/common/`, `src/lerobot/scripts/`, `src/lerobot/robots/robot.py`) without explicit user approval.
 - Do not modify `ref_only_*` files under any circumstance; they are read-only references.

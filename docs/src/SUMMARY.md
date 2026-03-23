@@ -4,6 +4,8 @@
 
 - [reference]()
 
+  - [CLAUDE_backup.md](reference/CLAUDE_backup.md)
+
   - [piper-act-deployment](reference/piper-act-deployment/README.md)
   
     - [01 LeRobot 开发笔记](reference/piper-act-deployment/01-lerobot-development-notes.md)
@@ -18,7 +20,9 @@
 - [review]()
 
   - [PiperMotorsBus write 及整体代码审查](review/piper-motors-bus-write-and-general.md)
+  - [单臂纯观测数据采集脚本设计](review/single-arm-observe-only-record.md)
 
 - [explain]()
 
   - [PiperMotorsBus 缺陷修复变更说明](explain/piper-motors-bus-bugfix.md)
+  - [piper_observe.py 单臂纯观测采集脚本说明](explain/piper-observe-script.md)

@@ -35,7 +35,8 @@ src/lerobot/
     └── __init__.py
 
 src/lerobot/scripts/
-└── lerobot_record.py             ← 框架主入口，适配工作最终目标，禁止修改
+├── lerobot_record.py             ← 框架主入口（主从臂遥操作采集），禁止修改
+└── piper_observe.py              ← 主动开发：单臂纯观测数据采集（无 teleop，echo action）
 ```
 
 > `ref_only_*` 文件来自 [Kane1440/lerobot_piper2](https://github.com/Kane1440/lerobot_piper2)，基于裸 `piper_sdk` 实现，仅供对照阅读，**不得修改**。
@@ -43,6 +44,8 @@ src/lerobot/scripts/
 ---
 
 ## 调用链与接口关系
+
+### 方案 A：主从臂遥操作采集（`lerobot-record`）
 
 ```
 lerobot-record
@@ -56,11 +59,29 @@ lerobot-record
                     └── piper_control.piper_interface.PiperInterface   ← CAN 通信
 ```
 
-`lerobot-record` 的调用流程（每 episode）：
+调用流程（每 episode）：
 1. `robot.connect()` → `bus.connect(enable=True)` → CAN 使能 + `robot.calibrate()`
 2. `teleop.connect()` → `bus.connect(enable=True)` → 主臂使能（允许手动拖动读取位置）
 3. 循环：`teleop.get_action()` → `robot.send_action(action)` → `robot.get_observation()`
 4. `robot.disconnect()` → `bus.safe_shutdown()` → 回安全位 + 失能
+
+### 方案 B：单臂纯观测采集（`piper-observe`）
+
+```
+piper-observe
+    │
+    └── Robot: PIPERFollower          (robots/piper_follower/piper_follower.py)
+            └── PiperMotorsBus        (motors/piper/piper.py)
+                    └── piper_control.piper_interface.PiperInterface   ← CAN 通信
+
+外部控制脚本 ──→ CAN 总线 ──→ Piper 机械臂（独立进程控制运动）
+```
+
+调用流程（每 episode）：
+1. `robot.connect()` → CAN 使能 + calibrate
+2. 循环：`robot.get_observation()` → echo action（action = 当前 state） → `dataset.add_frame()`
+3. 无 teleop、无 send_action（运动由外部 CAN 控制）
+4. `robot.disconnect()` → 回安全位 + 失能
 
 ---
 
@@ -126,9 +147,10 @@ lerobot-record
 
 ### P1 — 功能增强
 
-2. **键盘急停（e-stop）集成**：在控制循环中评估并复用 `BuiltinJointPositionController` 的软件层急停能力（见 CLAUDE.md 安全规则）
-3. **相机配置完善**：`config_piper_follower.py` 中相机字段已注释，需按实际硬件填写
-4. **end-to-end 联调**：用实体 Piper 运行 `lerobot-record --robot.type=piper_follower --teleop.type=piper_leader`
+2. **硬件验证 `piper-observe` 脚本**：在实体 Piper 上运行单臂纯观测采集，同时用外部脚本控制运动，确认 CAN 共存可行性
+3. **键盘急停（e-stop）集成**：在控制循环中评估并复用 `BuiltinJointPositionController` 的软件层急停能力
+4. **相机配置完善**：`config_piper_follower.py` 中相机字段需按实际硬件填写
+5. **end-to-end 联调**：用采集的数据集训练 ACT 模型，验证 echo action 方案的训练效果
 
 ---
 
