@@ -26,3 +26,6 @@
 
   - [PiperMotorsBus 缺陷修复变更说明](explain/piper-motors-bus-bugfix.md)
   - [piper_observe.py 单臂纯观测采集脚本说明](explain/piper-observe-script.md)
+  - [piper-observe 运行命令与操作指南](explain/piper-observe-run-guide.md)
+  - [piper-observe 数据集本地训练指南](explain/piper-train-guide.md)
+  - [Piper ACT 模型推理指南](explain/piper-inference-guide.md)

@@ -186,7 +186,7 @@ def observe(cfg: ObserveConfig) -> LeRobotDataset:
                 )
             sanity_check_dataset_robot_compatibility(dataset, robot, cfg.dataset.fps, dataset_features)
         else:
-            sanity_check_dataset_name(cfg.dataset.repo_id, policy=None)
+            sanity_check_dataset_name(cfg.dataset.repo_id, policy_cfg=None)
             dataset = LeRobotDataset.create(
                 cfg.dataset.repo_id,
                 cfg.dataset.fps,
@@ -259,6 +259,14 @@ def observe(cfg: ObserveConfig) -> LeRobotDataset:
             dataset.finalize()
 
         if robot.is_connected:
+            log_say("Recording finished. Stop external control scripts before disconnecting.", cfg.play_sounds, blocking=True)
+            print("\n" + "=" * 60)
+            print("录制已结束。请先终止外部控制脚本（如手柄遥操），然后按 Enter 断开机械臂。")
+            print("=" * 60)
+            try:
+                input()
+            except (KeyboardInterrupt, EOFError):
+                pass
             robot.disconnect()
 
         if not is_headless() and listener:

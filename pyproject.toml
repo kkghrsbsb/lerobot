@@ -88,6 +88,7 @@ dependencies = [
     "pytest>=8.4.2",
     "matplotlib>=3.10.8",
     "opencv-python>=4.13.0.92",
+    "pygame>=2.6.1",
 ]
 
 # Optional dependencies

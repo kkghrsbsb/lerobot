@@ -29,8 +29,14 @@ class PIPERFollowerConfig(RobotConfig):
 
     cameras: dict[str, CameraConfig] = field(
         default_factory=lambda: {
-            "cam_1": OpenCVCameraConfig(
+            "cam2": OpenCVCameraConfig(
                 index_or_path=2,
+                fps=30,
+                width=640,
+                height=480,
+            ),
+            "cam4": OpenCVCameraConfig(
+                index_or_path=4,
                 fps=30,
                 width=640,
                 height=480,
